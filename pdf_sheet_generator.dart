@@ -26,10 +26,14 @@ class PdfSheetGenerator {
     required String quizTitle,
     required String subjectName,
     String subjectCode = '33101',
+    String instructions = '',
     List<EssayQuestion> essayQuestions = const [],
+    Uint8List? customLogoBytes,
   }) async {
     final theme = await _loadThaiTheme();
     final pdf = pw.Document(theme: theme);
+    final pw.MemoryImage? customLogo =
+        customLogoBytes != null ? pw.MemoryImage(customLogoBytes) : null;
     final idGrid = template.getIdentityBubbles();
     final questionGrid = template.getQuestionBubbles();
 
@@ -75,7 +79,7 @@ class PdfSheetGenerator {
                     canvas.fillPath();
                   }
 
-                  // 2. กรอบหัวกระดาษฝั่งซ้าย + กรอบรหัสอ้างอิง 9 หลักฝั่งขวา
+                  // 2. กรอบหัวกระดาษฝั่งซ้าย + กรอบรหัส 3 ส่วนฝั่งขวา (รหัสวิชา, ชั้น/ห้อง, เลขที่)
                   canvas.setStrokeColor(PdfColors.grey800);
                   canvas.setLineWidth(1.0);
                   canvas.drawRect(
@@ -85,7 +89,29 @@ class PdfSheetGenerator {
                       502 * scaleX, toPdfY(376), 386 * scaleX, 286 * scaleY);
                   canvas.strokePath();
 
+                  // กรอบย่อยแยกส่วน: รหัสวิชา (5), ชั้น/ห้อง (2), เลขที่ (2)
+                  canvas.setStrokeColor(PdfColors.grey700);
+                  canvas.setLineWidth(0.85);
+                  for (final sec in const [
+                    [514.0, 184.0],
+                    [713.0, 73.0],
+                    [801.0, 73.0],
+                  ]) {
+                    canvas.drawRect(
+                        sec[0] * scaleX, toPdfY(370), sec[1] * scaleX, 272 * scaleY);
+                    canvas.strokePath();
+                    canvas.drawLine(
+                      sec[0] * scaleX,
+                      toPdfY(126),
+                      (sec[0] + sec[1]) * scaleX,
+                      toPdfY(126),
+                    );
+                    canvas.strokePath();
+                  }
+
                   // 3. วงกลมรหัสอ้างอิง 9 หลัก (วิชา 5 + ชั้น/ห้อง 2 + เลขที่ 2)
+                  canvas.setStrokeColor(PdfColors.grey800);
+                  canvas.setLineWidth(1.0);
                   for (final col in idGrid) {
                     for (final bubble in col) {
                       canvas.drawEllipse(
@@ -110,52 +136,148 @@ class PdfSheetGenerator {
                       canvas.strokePath();
                     }
                   }
+
+                  // 5. เส้นคั่นทุกๆ 5 ข้อในแต่ละแถบ กันตาลาย
+                  canvas.setStrokeColor(PdfColors.grey500);
+                  canvas.setLineWidth(0.75);
+                  for (int qIdx = 0; qIdx + 1 < questionGrid.length; qIdx++) {
+                    final int colInStrip = qIdx % perStrip;
+                    if (colInStrip % 5 == 4 && colInStrip + 1 < perStrip) {
+                      final double midX = (questionGrid[qIdx].first.x +
+                              questionGrid[qIdx + 1].first.x) /
+                          2.0;
+                      final double topY = questionGrid[qIdx].first.y - 24.0;
+                      final double bottomY = questionGrid[qIdx].last.y +
+                          questionGrid[qIdx].last.radius +
+                          4.0;
+                      canvas.drawLine(
+                        midX * scaleX,
+                        toPdfY(topY),
+                        midX * scaleX,
+                        toPdfY(bottomY),
+                      );
+                      canvas.strokePath();
+                    }
+                  }
                 },
               ),
 
-              // Layer 1.5: ข้อความหัวกระดาษ + เลขข้อ + ตัวเลือก (A/B/C/D หรือ ก/ข/ค/ง)
+              // Layer 1.5: ข้อความหัวกระดาษ + โลโก้ผู้ใช้ (ถ้ามี) + คำชี้แจง 3 บรรทัด
               pw.Positioned(
-                left: 100 * scaleX,
-                top: 98 * scaleY,
+                left: 102 * scaleX,
+                top: 96 * scaleY,
                 child: pw.SizedBox(
-                  width: 380 * scaleX,
+                  width: 376 * scaleX,
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text(
-                        quizTitle,
-                        style: pw.TextStyle(
-                            fontSize: 12, fontWeight: pw.FontWeight.bold),
-                      ),
-                      pw.SizedBox(height: 6),
-                      pw.Text(
-                        'ชื่อ-สกุล: ___________________________________',
-                        style: const pw.TextStyle(fontSize: 9.5),
-                      ),
+                      if (customLogo != null)
+                        pw.Row(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Container(
+                              width: 32,
+                              height: 32,
+                              child: pw.Image(
+                                customLogo,
+                                fit: pw.BoxFit.contain,
+                              ),
+                            ),
+                            pw.SizedBox(width: 8),
+                            pw.Expanded(
+                              child: pw.Text(
+                                quizTitle,
+                                maxLines: 2,
+                                style: pw.TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: pw.FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        pw.Text(
+                          quizTitle,
+                          maxLines: 2,
+                          style: pw.TextStyle(
+                              fontSize: 11.5, fontWeight: pw.FontWeight.bold),
+                        ),
                       pw.SizedBox(height: 5),
                       pw.Text(
-                        'วิชา: $subjectName ($subjectCode)   ห้อง: ม.___/___   เลขที่: ___',
-                        style: const pw.TextStyle(fontSize: 9),
+                        'ชื่อ-สกุล: ___________________________________',
+                        style: const pw.TextStyle(fontSize: 9.2),
                       ),
-                      pw.SizedBox(height: 8),
+                      pw.SizedBox(height: 3),
                       pw.Text(
-                        'รหัสอ้างอิง 9 หลัก: [รหัสวิชา 5 หลัก] + [ชั้น/ห้อง 2 หลัก] + [เลขที่ 2 หลัก]',
-                        style: const pw.TextStyle(
-                            fontSize: 8, color: PdfColors.grey700),
+                        'วิชา: $subjectName ($subjectCode)',
+                        maxLines: 1,
+                        style: const pw.TextStyle(fontSize: 8.8),
                       ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'ห้อง: ม.___/___   เลขที่: ___',
+                        style: const pw.TextStyle(fontSize: 8.8),
+                      ),
+                      if (instructions.trim().isNotEmpty) ...[
+                        pw.SizedBox(height: 5),
+                        pw.Container(height: 0.6, color: PdfColors.grey300),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          instructions.trim(),
+                          maxLines: 3,
+                          style: const pw.TextStyle(
+                            fontSize: 8.0,
+                            color: PdfColors.grey800,
+                            lineSpacing: 1.4,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
 
-              // Label กลุ่ม 9 หลักด้านบนกรอบรหัส
+              // Label หัวกรอบย่อย 3 ส่วน (รหัสวิชา, ชั้น/ห้อง, เลขที่)
               pw.Positioned(
-                left: 520 * scaleX,
-                top: 96 * scaleY,
-                child: pw.Text(
-                  'รหัสวิชา (5)      ชั้น/ห้อง (2)   เลขที่ (2)',
-                  style: pw.TextStyle(
-                      fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+                left: 514 * scaleX,
+                top: 100 * scaleY,
+                child: pw.SizedBox(
+                  width: 184 * scaleX,
+                  child: pw.Center(
+                    child: pw.Text(
+                      'รหัสวิชา (5)',
+                      style: pw.TextStyle(
+                          fontSize: 8, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
+              pw.Positioned(
+                left: 713 * scaleX,
+                top: 100 * scaleY,
+                child: pw.SizedBox(
+                  width: 73 * scaleX,
+                  child: pw.Center(
+                    child: pw.Text(
+                      'ชั้น/ห้อง',
+                      style: pw.TextStyle(
+                          fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
+              pw.Positioned(
+                left: 801 * scaleX,
+                top: 100 * scaleY,
+                child: pw.SizedBox(
+                  width: 73 * scaleX,
+                  child: pw.Center(
+                    child: pw.Text(
+                      'เลขที่',
+                      style: pw.TextStyle(
+                          fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
                 ),
               ),
 

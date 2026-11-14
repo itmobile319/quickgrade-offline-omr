@@ -133,6 +133,7 @@ class Quiz {
   final String title;
   final String subject;
   final String subjectCode; // รหัสวิชา 5 หลัก เช่น 33101
+  final String instructions; // คำอธิบาย/คำชี้แจงบนกระดาษคำตอบ (ไม่เกิน 3 บรรทัด)
   final SheetSize sheetSize;
   final int choicesCount;
   final List<int> answerKey;
@@ -144,6 +145,7 @@ class Quiz {
     required this.title,
     required this.subject,
     this.subjectCode = '33101',
+    this.instructions = '',
     required this.sheetSize,
     this.choicesCount = 4,
     required this.answerKey,
@@ -164,6 +166,7 @@ class Quiz {
         'title': title,
         'subject': subject,
         'subjectCode': subjectCode,
+        'instructions': instructions,
         'sheetSize': sheetSize.name,
         'choicesCount': choicesCount,
         'answerKeyJson': jsonEncode(answerKey),
@@ -183,6 +186,7 @@ class Quiz {
       title: map['title'] as String,
       subject: map['subject'] as String,
       subjectCode: (map['subjectCode'] as String?) ?? '33101',
+      instructions: (map['instructions'] as String?) ?? '',
       sheetSize: SheetSize.values.byName(map['sheetSize'] as String),
       choicesCount: map['choicesCount'] as int,
       answerKey: (jsonDecode(map['answerKeyJson'] as String) as List)

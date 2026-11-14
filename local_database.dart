@@ -14,7 +14,7 @@ class LocalDatabase {
 
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE quizzes (
@@ -22,6 +22,7 @@ class LocalDatabase {
             title TEXT NOT NULL,
             subject TEXT NOT NULL,
             subjectCode TEXT NOT NULL,
+            instructions TEXT NOT NULL DEFAULT '',
             sheetSize TEXT NOT NULL,
             choicesCount INTEGER NOT NULL,
             answerKeyJson TEXT NOT NULL,
@@ -44,6 +45,13 @@ class LocalDatabase {
             FOREIGN KEY (quizId) REFERENCES quizzes (id) ON DELETE CASCADE
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            "ALTER TABLE quizzes ADD COLUMN instructions TEXT NOT NULL DEFAULT ''",
+          );
+        }
       },
     );
     return _db!;

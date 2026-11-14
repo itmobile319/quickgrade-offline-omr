@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
@@ -24,7 +26,7 @@ class ZipGradeOfflineApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'QuickGrade Offline OMR',
+      title: 'หัวครกตรวจไว — Huakrog SpeedCheck',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E88E5)),
@@ -53,6 +55,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   String _quizTitle = 'แบบทดสอบเก็บคะแนน';
   String _subjectCode = '33101';
   String _subjectName = 'วิทยาศาสตร์พื้นฐาน';
+  String _sheetInstructions =
+      'คำชี้แจง: ใช้ดินสอ 2B ระบายคำตอบให้เต็มวง หากต้องการแก้ไขให้ลบให้สะอาดก่อนระบายใหม่';
+  Uint8List? _sheetLogoBytes;
+  ui.Image? _sheetLogoUiImage;
   late List<int> _answerKey;
   List<EssayQuestion> _essayQuestions = [
     const EssayQuestion(
@@ -81,6 +87,152 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     super.initState();
     _resetKeyForSize(_selectedSize);
     _loadFromDb();
+    _loadSheetLogo();
+  }
+
+  @override
+  void dispose() {
+    _sheetLogoUiImage?.dispose();
+    super.dispose();
+  }
+
+  Future<File> _sheetLogoFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File(p.join(dir.path, 'custom_sheet_logo.png'));
+  }
+
+  Future<ui.Image?> _decodeUiImage(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      return frame.image;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _loadSheetLogo() async {
+    try {
+      final file = await _sheetLogoFile();
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        final decoded = await _decodeUiImage(bytes);
+        if (!mounted) {
+          decoded?.dispose();
+          return;
+        }
+        setState(() {
+          _sheetLogoBytes = bytes;
+          _sheetLogoUiImage?.dispose();
+          _sheetLogoUiImage = decoded;
+        });
+      }
+    } catch (_) {
+      // Ignore missing or unreadable logo file
+    }
+  }
+
+  /// ย่อขนาดและบีบอัดไฟล์รูปภาพโลโก้ของกระดาษคำตอบให้มีขนาดเล็กโดยคงสัดส่วนเดิม
+  Future<Uint8List> _compressSheetLogo(Uint8List rawBytes) async {
+    final probeCodec = await ui.instantiateImageCodec(rawBytes);
+    final probeFrame = await probeCodec.getNextFrame();
+    final origW = probeFrame.image.width;
+    final origH = probeFrame.image.height;
+    probeFrame.image.dispose();
+    probeCodec.dispose();
+
+    Future<Uint8List> encodeMaxEdge(int maxEdge) async {
+      int targetW = origW;
+      int targetH = origH;
+      if (origW > maxEdge || origH > maxEdge) {
+        if (origW >= origH) {
+          targetW = maxEdge;
+          targetH = ((origH * maxEdge) / origW).round().clamp(1, maxEdge);
+        } else {
+          targetH = maxEdge;
+          targetW = ((origW * maxEdge) / origH).round().clamp(1, maxEdge);
+        }
+      }
+      final codec = await ui.instantiateImageCodec(
+        rawBytes,
+        targetWidth: targetW,
+        targetHeight: targetH,
+      );
+      final frame = await codec.getNextFrame();
+      final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+      frame.image.dispose();
+      codec.dispose();
+      return byteData?.buffer.asUint8List() ?? rawBytes;
+    }
+
+    Uint8List compressed = await encodeMaxEdge(240);
+    if (compressed.length > 80 * 1024) {
+      compressed = await encodeMaxEdge(160);
+    }
+    return compressed;
+  }
+
+  Future<void> _pickAndCompressSheetLogo({VoidCallback? onDialogUpdate}) async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 400,
+        maxHeight: 400,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      final rawBytes = await picked.readAsBytes();
+      final origSize = await File(picked.path).length();
+      final compressedBytes = await _compressSheetLogo(rawBytes);
+      final decoded = await _decodeUiImage(compressedBytes);
+
+      final file = await _sheetLogoFile();
+      await file.writeAsBytes(compressedBytes, flush: true);
+
+      if (!mounted) {
+        decoded?.dispose();
+        return;
+      }
+      setState(() {
+        _sheetLogoBytes = compressedBytes;
+        _sheetLogoUiImage?.dispose();
+        _sheetLogoUiImage = decoded;
+      });
+      onDialogUpdate?.call();
+
+      final origKb = (origSize / 1024).toStringAsFixed(1);
+      final newKb = (compressedBytes.length / 1024).toStringAsFixed(1);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'ใส่โลโก้บนกระดาษคำตอบแล้ว (บีบอัดไฟล์ $origKb KB → $newKb KB)'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ไม่สามารถนำเข้ารูปโลโก้ได้: $e')),
+      );
+    }
+  }
+
+  Future<void> _removeSheetLogo({VoidCallback? onDialogUpdate}) async {
+    try {
+      final file = await _sheetLogoFile();
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _sheetLogoBytes = null;
+      _sheetLogoUiImage?.dispose();
+      _sheetLogoUiImage = null;
+    });
+    onDialogUpdate?.call();
   }
 
   Future<void> _loadFromDb() async {
@@ -96,6 +248,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           if (q.title.trim().isNotEmpty) _quizTitle = q.title;
           _subjectCode = q.subjectCode;
           _subjectName = q.subject;
+          _sheetInstructions = q.instructions;
           _answerKey = List<int>.from(q.answerKey);
           _essayQuestions = List<EssayQuestion>.from(q.essayQuestions);
           _papers = savedPapers;
@@ -114,6 +267,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       title: _quizTitle,
       subject: _subjectName,
       subjectCode: _subjectCode,
+      instructions: _sheetInstructions,
       sheetSize: _selectedSize,
       choicesCount: _choicesCount,
       answerKey: _answerKey,
@@ -169,13 +323,55 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            const Flexible(
-              child: Text(
-                'QuickGrade OMR',
-                overflow: TextOverflow.ellipsis,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'หัวครกตรวจไว',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    'Huakrog SpeedCheck',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
             ),
           ],
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(24),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  width: 0.6,
+                ),
+              ),
+            ),
+            child: Text(
+              'หัวครกตรวจไว — ส่องปุ๊บ รู้ผลปั๊บ ตรวจข้อสอบไว ไม่ง้อเน็ต',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
         ),
         actions: [
           Padding(
@@ -311,7 +507,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
               ),
               IconButton(
-                tooltip: 'แก้ไขหัวข้อสอบ / ชื่อวิชา / รหัสวิชา',
+                tooltip: 'แก้ไขหัวข้อสอบ / วิชา / คำชี้แจง / โลโก้',
                 onPressed: _showSubjectSettingsDialog,
                 icon: const Icon(Icons.edit_outlined),
               ),
@@ -329,7 +525,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     quizTitle: _quizTitle,
                     subjectName: _subjectName,
                     subjectCode: _subjectCode,
+                    instructions: _sheetInstructions,
                     essayQuestions: _essayQuestions,
+                    customLogoBytes: _sheetLogoBytes,
                   );
                   await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
                 },
@@ -353,7 +551,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     quizTitle: _quizTitle,
                     subjectName: _subjectName,
                     subjectCode: _subjectCode,
+                    instructions: _sheetInstructions,
                     essayQuestions: _essayQuestions,
+                    sheetLogoImage: _sheetLogoUiImage,
                   ),
                 ),
               ),
@@ -368,69 +568,172 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     final titleCtrl = TextEditingController(text: _quizTitle);
     final codeCtrl = TextEditingController(text: _subjectCode);
     final nameCtrl = TextEditingController(text: _subjectName);
+    final instructionsCtrl = TextEditingController(text: _sheetInstructions);
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('ตั้งค่าหัวกระดาษคำตอบและวิชา'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'หัวข้อสอบ (แสดงบนกระดาษคำตอบ)',
-                  border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('ตั้งค่าหัวกระดาษคำตอบและวิชา'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'หัวข้อสอบ (แสดงบนกระดาษคำตอบ)',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'ชื่อวิชา',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'ชื่อวิชา',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: codeCtrl,
-                maxLength: 5,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'รหัสวิชา 5 หลัก (เช่น 33101)',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: codeCtrl,
+                  maxLength: 5,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'รหัสวิชา 5 หลัก (เช่น 33101)',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                TextField(
+                  controller: instructionsCtrl,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'คำอธิบาย / คำชี้แจงในกรอบ (สูงสุด 3 บรรทัด)',
+                    hintText: 'เช่น ใช้ดินสอ 2B ระบายให้เต็มวง ห้ามขีดเขียนนอกกรอบ',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: Theme.of(ctx).colorScheme.outlineVariant,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'โลโก้บนกระดาษคำตอบ (บีบอัดไฟล์ให้อัตโนมัติ)',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (_sheetLogoBytes != null)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.memory(
+                                _sheetLogoBytes!,
+                                width: 44,
+                                height: 44,
+                                fit: BoxFit.contain,
+                              ),
+                            )
+                          else
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: Theme.of(ctx)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Icon(Icons.image_outlined, size: 22),
+                            ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _sheetLogoBytes != null
+                                  ? 'พร้อมใช้งาน (${(_sheetLogoBytes!.length / 1024).toStringAsFixed(1)} KB)'
+                                  : 'ยังไม่ใส่โลโก้ (เว้นว่าง)',
+                              style: Theme.of(ctx).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _pickAndCompressSheetLogo(
+                                onDialogUpdate: () => setDialogState(() {}),
+                              ),
+                              icon: const Icon(Icons.photo_library_outlined,
+                                  size: 16),
+                              label: Text(_sheetLogoBytes != null
+                                  ? 'เปลี่ยนรูป'
+                                  : 'เลือกรูปโลโก้'),
+                            ),
+                          ),
+                          if (_sheetLogoBytes != null) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: 'ลบโลโก้ออกจากกระดาษคำตอบ',
+                              onPressed: () => _removeSheetLogo(
+                                onDialogUpdate: () => setDialogState(() {}),
+                              ),
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.red),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('ยกเลิก'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('บันทึก'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('ยกเลิก'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('บันทึก'),
-          ),
-        ],
       ),
     );
 
     final newTitle = titleCtrl.text.trim();
     final newName = nameCtrl.text.trim();
     final rawCode = codeCtrl.text.trim();
+    final newInstructions = instructionsCtrl.text.trim();
     titleCtrl.dispose();
     codeCtrl.dispose();
     nameCtrl.dispose();
+    instructionsCtrl.dispose();
 
     if (saved == true) {
       setState(() {
         if (newTitle.isNotEmpty) _quizTitle = newTitle;
         if (newName.isNotEmpty) _subjectName = newName;
         if (rawCode.isNotEmpty) _subjectCode = rawCode.padLeft(5, '0');
+        _sheetInstructions = newInstructions;
       });
       await _persistQuiz();
     }
@@ -1082,14 +1385,18 @@ class AnswerSheetCanvasPainter extends CustomPainter {
   final String quizTitle;
   final String subjectName;
   final String subjectCode;
+  final String instructions;
   final List<EssayQuestion> essayQuestions;
+  final ui.Image? sheetLogoImage;
 
   AnswerSheetCanvasPainter({
     required this.template,
     required this.quizTitle,
     required this.subjectName,
     required this.subjectCode,
+    this.instructions = '',
     required this.essayQuestions,
+    this.sheetLogoImage,
   });
 
   void _drawCanvasText(
@@ -1101,6 +1408,7 @@ class AnswerSheetCanvasPainter extends CustomPainter {
     FontWeight fontWeight = FontWeight.normal,
     Color color = Colors.black87,
     int maxLines = 1,
+    TextAlign textAlign = TextAlign.left,
   }) {
     final painter = TextPainter(
       text: TextSpan(
@@ -1111,10 +1419,11 @@ class AnswerSheetCanvasPainter extends CustomPainter {
           color: color,
         ),
       ),
+      textAlign: textAlign,
       textDirection: TextDirection.ltr,
       maxLines: maxLines,
       ellipsis: '...',
-    )..layout(maxWidth: maxWidth);
+    )..layout(minWidth: textAlign == TextAlign.center ? maxWidth : 0, maxWidth: maxWidth);
     painter.paint(canvas, offset);
   }
 
@@ -1132,6 +1441,10 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       ..strokeWidth = 1.2;
     final boxPaint = Paint()
       ..color = Colors.grey.shade700
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.9;
+    final groupDividerPaint = Paint()
+      ..color = Colors.grey.shade500
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.9;
     final essayLinePaint = Paint()
@@ -1157,7 +1470,7 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       );
     }
 
-    // กรอบหัวกระดาษฝั่งซ้าย + กรอบรหัสอ้างอิง 9 หลักฝั่งขวา
+    // กรอบหัวกระดาษฝั่งซ้าย + กรอบรหัส 3 ส่วนฝั่งขวา (รหัสวิชา, ชั้น/ห้อง, เลขที่)
     canvas.drawRect(
       Rect.fromLTWH(92 * scaleX, 90 * scaleY, 396 * scaleX, 286 * scaleY),
       boxPaint,
@@ -1167,13 +1480,53 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       boxPaint,
     );
 
-    // ข้อความหัวกระดาษที่แก้ไขได้ + ชื่อวิชาและรหัสวิชาอัตโนมัติ
+    const idSections = [
+      (514.0, 184.0, 'รหัสวิชา (5)', 12.5),
+      (713.0, 73.0, 'ชั้น/ห้อง', 11.5),
+      (801.0, 73.0, 'เลขที่', 11.5),
+    ];
+    for (final sec in idSections) {
+      final (secX, secW, secLabel, labelFontSize) = sec;
+      canvas.drawRect(
+        Rect.fromLTWH(secX * scaleX, 98 * scaleY, secW * scaleX, 272 * scaleY),
+        boxPaint,
+      );
+      canvas.drawLine(
+        Offset(secX * scaleX, 126 * scaleY),
+        Offset((secX + secW) * scaleX, 126 * scaleY),
+        boxPaint,
+      );
+      _drawCanvasText(
+        canvas,
+        text: secLabel,
+        offset: Offset(secX * scaleX, 103 * scaleY),
+        maxWidth: secW * scaleX,
+        fontSize: (labelFontSize * scaleX).clamp(4.5, labelFontSize),
+        fontWeight: FontWeight.bold,
+        textAlign: TextAlign.center,
+      );
+    }
+
+    // โลโก้ผู้ใช้บนกระดาษคำตอบ (ถ้าผู้ใช้เลือกใส่เอง) + ข้อความหัวกระดาษ
+    final double headerTextLeft = sheetLogoImage != null ? 176.0 : 104.0;
+    final double headerTextMaxW = sheetLogoImage != null ? 300.0 : 372.0;
+
+    if (sheetLogoImage != null) {
+      paintImage(
+        canvas: canvas,
+        rect: Rect.fromLTWH(
+            102 * scaleX, 100 * scaleY, 62 * scaleX, 62 * scaleY),
+        image: sheetLogoImage!,
+        fit: BoxFit.contain,
+      );
+    }
+
     _drawCanvasText(
       canvas,
       text: quizTitle,
-      offset: Offset(104 * scaleX, 104 * scaleY),
-      maxWidth: 372 * scaleX,
-      fontSize: (22 * scaleX).clamp(7.0, 22.0),
+      offset: Offset(headerTextLeft * scaleX, 102 * scaleY),
+      maxWidth: headerTextMaxW * scaleX,
+      fontSize: (20 * scaleX).clamp(6.5, 20.0),
       fontWeight: FontWeight.bold,
       color: Colors.black,
       maxLines: 2,
@@ -1181,41 +1534,41 @@ class AnswerSheetCanvasPainter extends CustomPainter {
     _drawCanvasText(
       canvas,
       text: 'ชื่อ-สกุล: ________________________',
-      offset: Offset(104 * scaleX, 178 * scaleY),
+      offset: Offset(104 * scaleX, 174 * scaleY),
       maxWidth: 372 * scaleX,
       fontSize: (16 * scaleX).clamp(5.5, 16.0),
     );
     _drawCanvasText(
       canvas,
       text: 'วิชา: $subjectName ($subjectCode)',
-      offset: Offset(104 * scaleX, 222 * scaleY),
+      offset: Offset(104 * scaleX, 206 * scaleY),
       maxWidth: 372 * scaleX,
-      fontSize: (16 * scaleX).clamp(5.5, 16.0),
+      fontSize: (15.5 * scaleX).clamp(5.0, 15.5),
       fontWeight: FontWeight.w600,
     );
     _drawCanvasText(
       canvas,
       text: 'ห้อง: ม.___/___   เลขที่: ___',
-      offset: Offset(104 * scaleX, 260 * scaleY),
+      offset: Offset(104 * scaleX, 236 * scaleY),
       maxWidth: 372 * scaleX,
       fontSize: (15 * scaleX).clamp(5.0, 15.0),
     );
-    _drawCanvasText(
-      canvas,
-      text: 'รหัสอ้างอิง 9 หลัก: [วิชา 5]+[ชั้น/ห้อง 2]+[เลขที่ 2]',
-      offset: Offset(104 * scaleX, 304 * scaleY),
-      maxWidth: 372 * scaleX,
-      fontSize: (13 * scaleX).clamp(4.5, 13.0),
-      color: Colors.grey.shade700,
-    );
-    _drawCanvasText(
-      canvas,
-      text: 'รหัสวิชา (5)   ชั้น/ห้อง (2)   เลขที่ (2)',
-      offset: Offset(518 * scaleX, 98 * scaleY),
-      maxWidth: 360 * scaleX,
-      fontSize: (14 * scaleX).clamp(5.0, 14.0),
-      fontWeight: FontWeight.bold,
-    );
+    if (instructions.trim().isNotEmpty) {
+      canvas.drawLine(
+        Offset(104 * scaleX, 266 * scaleY),
+        Offset(476 * scaleX, 266 * scaleY),
+        essayLinePaint,
+      );
+      _drawCanvasText(
+        canvas,
+        text: instructions.trim(),
+        offset: Offset(104 * scaleX, 274 * scaleY),
+        maxWidth: 372 * scaleX,
+        fontSize: (13 * scaleX).clamp(4.2, 13.0),
+        color: Colors.grey.shade800,
+        maxLines: 3,
+      );
+    }
 
     // 9-Digit Identity Bubbles (วิชา 5 + ชั้น/ห้อง 2 + เลขที่ 2)
     for (final col in template.getIdentityBubbles()) {
@@ -1228,13 +1581,30 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       }
     }
 
-    // Horizontal Transposed Answer Bubbles
-    for (final row in template.getQuestionBubbles()) {
+    // Horizontal Transposed Answer Bubbles + เส้นคั่นทุกๆ 5 ข้อ
+    final questionGrid = template.getQuestionBubbles();
+    final perStrip = template.sheetSize.questionsPerStrip;
+    for (final row in questionGrid) {
       for (final b in row) {
         canvas.drawCircle(
           Offset(b.x * scaleX, b.y * scaleY),
           b.radius * scaleX,
           strokePaint,
+        );
+      }
+    }
+    for (int qIdx = 0; qIdx + 1 < questionGrid.length; qIdx++) {
+      final colInStrip = qIdx % perStrip;
+      if (colInStrip % 5 == 4 && colInStrip + 1 < perStrip) {
+        final midX =
+            (questionGrid[qIdx].first.x + questionGrid[qIdx + 1].first.x) / 2.0;
+        final topY = questionGrid[qIdx].first.y - 24.0;
+        final bottomY =
+            questionGrid[qIdx].last.y + questionGrid[qIdx].last.radius + 4.0;
+        canvas.drawLine(
+          Offset(midX * scaleX, topY * scaleY),
+          Offset(midX * scaleX, bottomY * scaleY),
+          groupDividerPaint,
         );
       }
     }
@@ -1283,5 +1653,7 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       oldDelegate.quizTitle != quizTitle ||
       oldDelegate.subjectName != subjectName ||
       oldDelegate.subjectCode != subjectCode ||
+      oldDelegate.instructions != instructions ||
+      oldDelegate.sheetLogoImage != sheetLogoImage ||
       oldDelegate.essayQuestions != essayQuestions;
 }
