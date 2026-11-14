@@ -43,7 +43,8 @@ jobs:
       - name: Generate Android platform files
         run: |
           flutter create . --platforms=android --org com.quickgrade.omr --project-name zipgrade_offline_app
-
+          rm -f test/widget_test.dart
+          
       - name: Configure AndroidManifest CAMERA permission & minSdk 24
         run: |
           python3 -c '
