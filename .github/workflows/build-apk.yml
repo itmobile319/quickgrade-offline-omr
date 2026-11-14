@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate Android App Icons
+        run: dart run flutter_launcher_icons
+
       - name: Configure Android permissions, minSdk 24 & compileSdk
         run: |
           python3 - << 'PY'

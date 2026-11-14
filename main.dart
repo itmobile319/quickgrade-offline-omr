@@ -50,6 +50,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   SheetSize _selectedSize = SheetSize.q20;
   int _choicesCount = 4;
   bool _useEnglishLabels = false;
+  String _quizTitle = 'แบบทดสอบเก็บคะแนน';
   String _subjectCode = '33101';
   String _subjectName = 'วิทยาศาสตร์พื้นฐาน';
   late List<int> _answerKey;
@@ -92,6 +93,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         setState(() {
           _selectedSize = q.sheetSize;
           _choicesCount = q.choicesCount;
+          if (q.title.trim().isNotEmpty) _quizTitle = q.title;
           _subjectCode = q.subjectCode;
           _subjectName = q.subject;
           _answerKey = List<int>.from(q.answerKey);
@@ -109,7 +111,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   Future<void> _persistQuiz() async {
     final quiz = Quiz(
       id: _defaultQuizId,
-      title: 'แบบทดสอบ ${_selectedSize.questionCount} ข้อ',
+      title: _quizTitle,
       subject: _subjectName,
       subjectCode: _subjectCode,
       sheetSize: _selectedSize,
@@ -155,7 +157,26 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QuickGrade OMR (Offline)'),
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/images/app_logo.png',
+                width: 34,
+                height: 34,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Flexible(
+              child: Text(
+                'QuickGrade OMR',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 4),
@@ -203,25 +224,50 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           _buildReviewAndAnalyticsTab(template),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentTab,
-        onDestinationSelected: (idx) => setState(() => _currentTab = idx),
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.description_outlined),
-            label: 'กระดาษคำตอบ',
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MediaQuery.removePadding(
+            context: context,
+            removeBottom: true,
+            child: NavigationBar(
+              selectedIndex: _currentTab,
+              onDestinationSelected: (idx) => setState(() => _currentTab = idx),
+              destinations: [
+                const NavigationDestination(
+                  icon: Icon(Icons.description_outlined),
+                  label: 'กระดาษคำตอบ',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.edit_note),
+                  label: 'เฉลย/อัตนัย',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.qr_code_scanner),
+                  label: 'สแกนตรวจ',
+                ),
+                NavigationDestination(
+                  icon: const Icon(Icons.analytics_outlined),
+                  label: 'ผลสอบ (${_papers.length})',
+                ),
+              ],
+            ),
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.edit_note),
-            label: 'เฉลย/อัตนัย',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.qr_code_scanner),
-            label: 'สแกนตรวจ',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.analytics_outlined),
-            label: 'ผลสอบ (${_papers.length})',
+          Container(
+            width: double.infinity,
+            color: Theme.of(context).colorScheme.surfaceContainer,
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+            child: SafeArea(
+              top: false,
+              child: Text(
+                '© 2026 Napatpong Pongcharas',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
           ),
         ],
       ),
@@ -239,19 +285,35 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               const Icon(Icons.print_outlined),
               const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${_selectedSize.label} • อัตนัย ${_essayQuestions.length} ข้อ',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: _showSubjectSettingsDialog,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _quizTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          'วิชา: $_subjectName ($_subjectCode) • ${_selectedSize.questionCount} ข้อ • อัตนัย ${_essayQuestions.length} ข้อ',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
-                    Text(
-                      'วิชา: $_subjectName ($_subjectCode)',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                  ),
                 ),
+              ),
+              IconButton(
+                tooltip: 'แก้ไขหัวข้อสอบ / ชื่อวิชา / รหัสวิชา',
+                onPressed: _showSubjectSettingsDialog,
+                icon: const Icon(Icons.edit_outlined),
               ),
               IconButton(
                 tooltip: 'สลับ ก-ง / A-D',
@@ -264,7 +326,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   final pdfBytes =
                       await PdfSheetGenerator.generateAnswerSheetPdf(
                     template: template,
-                    quizTitle: 'แบบทดสอบ ${_selectedSize.questionCount} ข้อ',
+                    quizTitle: _quizTitle,
                     subjectName: _subjectName,
                     subjectCode: _subjectCode,
                     essayQuestions: _essayQuestions,
@@ -288,6 +350,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 child: CustomPaint(
                   painter: AnswerSheetCanvasPainter(
                     template: template,
+                    quizTitle: _quizTitle,
+                    subjectName: _subjectName,
+                    subjectCode: _subjectCode,
                     essayQuestions: _essayQuestions,
                   ),
                 ),
@@ -300,35 +365,46 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   Future<void> _showSubjectSettingsDialog() async {
+    final titleCtrl = TextEditingController(text: _quizTitle);
     final codeCtrl = TextEditingController(text: _subjectCode);
     final nameCtrl = TextEditingController(text: _subjectName);
 
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('ตั้งค่าวิชา (หัวกระดาษคำตอบ)'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'ชื่อวิชา',
-                border: OutlineInputBorder(),
+        title: const Text('ตั้งค่าหัวกระดาษคำตอบและวิชา'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'หัวข้อสอบ (แสดงบนกระดาษคำตอบ)',
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: codeCtrl,
-              maxLength: 5,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: 'รหัสวิชา 5 หลัก (เช่น 33101)',
-                border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'ชื่อวิชา',
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: codeCtrl,
+                maxLength: 5,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'รหัสวิชา 5 หลัก (เช่น 33101)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -343,15 +419,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       ),
     );
 
+    final newTitle = titleCtrl.text.trim();
     final newName = nameCtrl.text.trim();
-    final newCode = codeCtrl.text.trim().padLeft(5, '0');
+    final rawCode = codeCtrl.text.trim();
+    titleCtrl.dispose();
     codeCtrl.dispose();
     nameCtrl.dispose();
 
     if (saved == true) {
       setState(() {
+        if (newTitle.isNotEmpty) _quizTitle = newTitle;
         if (newName.isNotEmpty) _subjectName = newName;
-        if (newCode.isNotEmpty) _subjectCode = newCode;
+        if (rawCode.isNotEmpty) _subjectCode = rawCode.padLeft(5, '0');
       });
       await _persistQuiz();
     }
@@ -442,11 +521,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         linesCount: linesCount,
       );
       setState(() {
+        final updatedList = List<EssayQuestion>.from(_essayQuestions);
         if (editIndex != null) {
-          _essayQuestions[editIndex] = item;
+          updatedList[editIndex] = item;
         } else {
-          _essayQuestions.add(item);
+          updatedList.add(item);
         }
+        _essayQuestions = updatedList;
       });
       await _persistQuiz();
     }
@@ -474,7 +555,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
               ),
               IconButton(
-                tooltip: 'ตั้งค่าชื่อ/รหัสวิชา',
+                tooltip: 'ตั้งค่าหัวข้อสอบ/ชื่อ/รหัสวิชา',
                 onPressed: _showSubjectSettingsDialog,
                 icon: const Icon(Icons.settings_outlined),
               ),
@@ -572,8 +653,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                                     icon: const Icon(Icons.delete_outline,
                                         color: Colors.red),
                                     onPressed: () {
-                                      setState(
-                                          () => _essayQuestions.removeAt(i));
+                                      setState(() {
+                                        final updatedList =
+                                            List<EssayQuestion>.from(
+                                                _essayQuestions)
+                                              ..removeAt(i);
+                                        _essayQuestions = updatedList;
+                                      });
                                       _persistQuiz();
                                     },
                                   ),
@@ -993,12 +1079,44 @@ class ViewfinderOverlayPainter extends CustomPainter {
 
 class AnswerSheetCanvasPainter extends CustomPainter {
   final FormTemplate template;
+  final String quizTitle;
+  final String subjectName;
+  final String subjectCode;
   final List<EssayQuestion> essayQuestions;
 
   AnswerSheetCanvasPainter({
     required this.template,
+    required this.quizTitle,
+    required this.subjectName,
+    required this.subjectCode,
     required this.essayQuestions,
   });
+
+  void _drawCanvasText(
+    Canvas canvas, {
+    required String text,
+    required Offset offset,
+    required double maxWidth,
+    required double fontSize,
+    FontWeight fontWeight = FontWeight.normal,
+    Color color = Colors.black87,
+    int maxLines = 1,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: fontWeight,
+          color: color,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: maxLines,
+      ellipsis: '...',
+    )..layout(maxWidth: maxWidth);
+    painter.paint(canvas, offset);
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1012,6 +1130,10 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       ..color = Colors.black87
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
+    final boxPaint = Paint()
+      ..color = Colors.grey.shade700
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.9;
     final essayLinePaint = Paint()
       ..color = Colors.grey.shade400
       ..style = PaintingStyle.stroke
@@ -1035,6 +1157,66 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       );
     }
 
+    // กรอบหัวกระดาษฝั่งซ้าย + กรอบรหัสอ้างอิง 9 หลักฝั่งขวา
+    canvas.drawRect(
+      Rect.fromLTWH(92 * scaleX, 90 * scaleY, 396 * scaleX, 286 * scaleY),
+      boxPaint,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(502 * scaleX, 90 * scaleY, 386 * scaleX, 286 * scaleY),
+      boxPaint,
+    );
+
+    // ข้อความหัวกระดาษที่แก้ไขได้ + ชื่อวิชาและรหัสวิชาอัตโนมัติ
+    _drawCanvasText(
+      canvas,
+      text: quizTitle,
+      offset: Offset(104 * scaleX, 104 * scaleY),
+      maxWidth: 372 * scaleX,
+      fontSize: (22 * scaleX).clamp(7.0, 22.0),
+      fontWeight: FontWeight.bold,
+      color: Colors.black,
+      maxLines: 2,
+    );
+    _drawCanvasText(
+      canvas,
+      text: 'ชื่อ-สกุล: ________________________',
+      offset: Offset(104 * scaleX, 178 * scaleY),
+      maxWidth: 372 * scaleX,
+      fontSize: (16 * scaleX).clamp(5.5, 16.0),
+    );
+    _drawCanvasText(
+      canvas,
+      text: 'วิชา: $subjectName ($subjectCode)',
+      offset: Offset(104 * scaleX, 222 * scaleY),
+      maxWidth: 372 * scaleX,
+      fontSize: (16 * scaleX).clamp(5.5, 16.0),
+      fontWeight: FontWeight.w600,
+    );
+    _drawCanvasText(
+      canvas,
+      text: 'ห้อง: ม.___/___   เลขที่: ___',
+      offset: Offset(104 * scaleX, 260 * scaleY),
+      maxWidth: 372 * scaleX,
+      fontSize: (15 * scaleX).clamp(5.0, 15.0),
+    );
+    _drawCanvasText(
+      canvas,
+      text: 'รหัสอ้างอิง 9 หลัก: [วิชา 5]+[ชั้น/ห้อง 2]+[เลขที่ 2]',
+      offset: Offset(104 * scaleX, 304 * scaleY),
+      maxWidth: 372 * scaleX,
+      fontSize: (13 * scaleX).clamp(4.5, 13.0),
+      color: Colors.grey.shade700,
+    );
+    _drawCanvasText(
+      canvas,
+      text: 'รหัสวิชา (5)   ชั้น/ห้อง (2)   เลขที่ (2)',
+      offset: Offset(518 * scaleX, 98 * scaleY),
+      maxWidth: 360 * scaleX,
+      fontSize: (14 * scaleX).clamp(5.0, 14.0),
+      fontWeight: FontWeight.bold,
+    );
+
     // 9-Digit Identity Bubbles (วิชา 5 + ชั้น/ห้อง 2 + เลขที่ 2)
     for (final col in template.getIdentityBubbles()) {
       for (final b in col) {
@@ -1057,7 +1239,15 @@ class AnswerSheetCanvasPainter extends CustomPainter {
       }
     }
 
-    // Subjective / Essay Writing Lines (ด้านล่างนอกกรอบ OMR)
+    // Subjective / Essay Section Header & Writing Lines (ด้านล่างนอกกรอบ OMR)
+    _drawCanvasText(
+      canvas,
+      text: 'ตอนที่ 2: ข้อสอบอัตนัย — $subjectName ($subjectCode)',
+      offset: Offset(80 * scaleX, (omrBottom + 14) * scaleY),
+      maxWidth: (w - 160) * scaleX,
+      fontSize: (16 * scaleX).clamp(5.5, 16.0),
+      fontWeight: FontWeight.bold,
+    );
     double curY = omrBottom + 48.0;
     if (essayQuestions.isEmpty) {
       for (double y = curY;
@@ -1090,5 +1280,8 @@ class AnswerSheetCanvasPainter extends CustomPainter {
   bool shouldRepaint(covariant AnswerSheetCanvasPainter oldDelegate) =>
       oldDelegate.template.sheetSize != template.sheetSize ||
       oldDelegate.template.choicesCount != template.choicesCount ||
+      oldDelegate.quizTitle != quizTitle ||
+      oldDelegate.subjectName != subjectName ||
+      oldDelegate.subjectCode != subjectCode ||
       oldDelegate.essayQuestions != essayQuestions;
 }
