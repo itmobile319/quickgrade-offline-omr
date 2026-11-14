@@ -1,0 +1,30 @@
+name: zipgrade_offline_app
+description: Offline OMR Answer Sheet Grading Mobile App (20/30/40/50 Questions) inspired by ZipGrade.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.11.0+2
+  opencv_dart: ^1.4.3
+  sqflite: ^2.3.3+1
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  pdf: ^3.11.1
+  printing: ^5.13.2
+  csv: ^6.0.0
+  share_plus: ^10.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/
