@@ -125,22 +125,22 @@ jobs:
                   p.write_text(g, encoding="utf-8")
                   print(f"Patched app gradle: {p}")
 
-          # 5. Disable lintVital tasks across all subprojects in root android/build.gradle.kts
+          # 5. Disable lintVital tasks across all subprojects via taskGraph
           root_kts = Path("android/build.gradle.kts")
           if root_kts.exists():
               rk = root_kts.read_text(encoding="utf-8")
               disable_snippet = (
-                  "\nsubprojects {\n"
-                  "    afterEvaluate {\n"
-                  "        tasks.matching { it.name.startsWith(\"lintVital\") || it.name.contains(\"Lint\") }.configureEach {\n"
-                  "            enabled = false\n"
+                  "\ngradle.taskGraph.whenReady {\n"
+                  "    allTasks.forEach { task ->\n"
+                  "        if (task.name.contains(\"lintVital\", ignoreCase = true)) {\n"
+                  "            task.enabled = false\n"
                   "        }\n"
                   "    }\n"
                   "}\n"
               )
-              if "tasks.matching { it.name.startsWith(\"lintVital\")" not in rk:
+              if "gradle.taskGraph.whenReady" not in rk:
                   root_kts.write_text(rk + disable_snippet, encoding="utf-8")
-                  print("Patched root android/build.gradle.kts")
+                  print("Patched root android/build.gradle.kts with taskGraph disable")
 
           # 6. Patch pub-cache plugins (camera_android_camerax, opencv_dart, etc.)
           pub_dirs = []
