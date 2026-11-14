@@ -44,7 +44,7 @@ jobs:
         run: |
           flutter create . --platforms=android --org com.quickgrade.omr --project-name zipgrade_offline_app
           rm -f test/widget_test.dart
-          
+
       - name: Configure AndroidManifest CAMERA permission & minSdk 24
         run: |
           python3 -c '
@@ -68,6 +68,24 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Bump opencv_dart compileSdk to match AndroidX
+        run: |
+          python3 -c '
+          import os, re
+          from pathlib import Path
+          sdk_root = Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk")
+          sdks = sorted([int(d.name.split("-")[1].split(".")[0]) for d in (sdk_root / "platforms").glob("android-*") if d.name.split("-")[1].split(".")[0].isdigit()])
+          sdk = str(sdks[-1]) if sdks else "35"
+          print("Using compileSdk:", sdk)
+          pub_cache = Path(os.environ.get("PUB_CACHE", str(Path.home() / ".pub-cache")))
+          for p in pub_cache.rglob("opencv_dart*/android/build.gradle*"):
+              t = p.read_text(encoding="utf-8")
+              t = re.sub(r"compileSdkVersion\s+\d+", f"compileSdkVersion {sdk}", t)
+              t = re.sub(r"compileSdk\s*=?\s*\d+", f"compileSdk {sdk}", t)
+              p.write_text(t, encoding="utf-8")
+              print("Patched:", p)
+          '
 
       - name: Run Flutter Analyze
         run: flutter analyze --no-fatal-infos
